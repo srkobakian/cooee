@@ -1,9 +1,12 @@
-required_packages <- c("shiny", "tidyverse", "googlesheets", "DT", "jsonlite", "purrr", "shinydashboard")
+required_packages <- c("shiny", "tidyverse", "googlesheets4", "googledrive", "DT", "jsonlite", "purrr", "shinydashboard")
 missing_packages <- !(required_packages %in% rownames(installed.packages()))
 if(any(missing_packages)){
   stop(paste0('Some additional packages are necessary to run this app. Please install them using this command:
        install.packages(c("', paste0(required_packages[missing_packages], collapse = '", "'), '"))'))
 }
+
+# Set up authentication with Tidyverse API packages
+
 
 library(shiny)
 runApp(port = 4642)

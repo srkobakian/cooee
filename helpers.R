@@ -2,6 +2,8 @@ has_internet <- function(){
   !is.null(curl::nslookup("r-project.org", error = FALSE))
 }
 
+# function to split lines read into character strings
+# to replicate line and paragraph spacing of document
 formText <- function(...){
   paste(...) %>%
     strsplit("\n", fixed=TRUE) %>%
@@ -19,3 +21,4 @@ fuzzyMatching <- function(pattern, dataset){
     map(~ as.character(.) %>% strsplit(" ") %>% unlist) %>%
     map_dbl(~ sum(agrepl(gsub(" ", "|", pattern), .))/length(.))
 }
+

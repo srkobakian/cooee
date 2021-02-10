@@ -5,15 +5,15 @@ library(googlesheets)
 shinyUI(
   dashboardPage(
     dashboardHeader(
-      title = "useR 2018 Abstract Review",
-      titleWidth = "450px"
+      title = "MBAT Application Review",
+      titleWidth = "475px"
     ),
     dashboardSidebar(
-      width = "450px",
+      width = "475px",
       uiOutput("auth"),
       uiOutput("sync"),
-      radioButtons("net_mode", "Net Mode", c("Online", "Offline"), inline = TRUE),
-      radioButtons("admin_mode", "Operation Mode", c("Reviewer", "Administrator"), inline = TRUE),
+      #radioButtons("net_mode", "Net Mode", c("Online", "Offline"), inline = TRUE),
+      #radioButtons("admin_mode", "Operation Mode", c("Reviewer", "Administrator"), inline = TRUE),
       sidebarMenu(
         tags$li(
           actionLink("btn_debug",
@@ -37,19 +37,21 @@ shinyUI(
       # uiOutput("n_entries"),
       hr(),
       fluidRow(
-        column(4, radioButtons("filter_decisions", "Decision filter", c("On", "Off"))),
-        column(4, sliderInput("slider_reviews", "Total reviews", min = 0, max = 1, value = c(0, 2), step=1)),
-        column(4, checkboxGroupInput("pres_format", "Presentation formats", choices = c("presentation", "poster", "lightning talk"), selected = c("presentation", "poster", "lightning talk")))
+        column(4, checkboxGroupInput("decided", "Decision\nmade", choices = c("Y", "N"), selected = "N")),
+        column(4, sliderInput("slider_wam", "WAM",
+                              min = 0, max = 100, value = c(50, 100), step=5)),
+        column(4, checkboxGroupInput("stats_background", "Statistics\nBackground", choices = c("Y", "N"), selected = c("Y", "N")))
       ),
       textInput("text_match", "Fuzzy text sorting"),
       DT::dataTableOutput("tbl_applicants")
     ),
     dashboardBody(
       tags$head(
-        tags$link(rel = "stylesheet", type = "text/css", href = "custom.css")
+        tags$link(rel = "stylesheet", type = "text/css", href = "custom.css"),
+        
       ),
+      
       uiOutput("abstract"),
-      uiOutput("feedback"),
       uiOutput("review")
     )
   )

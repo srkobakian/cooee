@@ -1,17 +1,25 @@
 library(shiny)
 library(tidyverse)
-library(googlesheets)
+library(googledrive)
+library(googlesheets4)
 library(DT)
 library(jsonlite)
 library(purrr)
+library(googledrive)
+library(pdftools)
+
+
 
 shinyServer(
   function(input, output, session) {
     source("helpers.R")
     
+    
+    # load in previous decisions if there is a cache
     if("cache_abstracts.Rdata" %in% list.files()){
       notif_cache <- showNotification("Loading cache")
       load("cache_abstracts.Rdata")
+      
       if(exists("v")){
         if(is.reactivevalues(v)){
           # Update cache format
@@ -25,9 +33,8 @@ shinyServer(
     else{
       v <- reactiveValues(
         data = list(),
-        reviews = list(),
         decisions = list(),
-        changes = list(reviews = list(), decisions = list()),
+        changes = list(decisions = list()),
         online = FALSE,
         lastSync = "Never",
         ID = 1,
@@ -36,22 +43,14 @@ shinyServer(
       )
     }
     
-    # Update old caches for new structure
-    observe({
-      if(is.null(v$decisions)){
-        v$decisions <- list()
-        v$changes <- list(reviews = v$changes, decisions = list())
-        v$firstRun <- TRUE
-      }
-    })
     
     notif_ui <- showNotification("Building UI")
     
-    latest_reviews <- reactive({
+    latest_decisions <- reactive({
       notif_data <- showNotification("Constructing dataset")
-      out <- v$reviews %>%
+      out <- v$decisions %>%
         as_tibble %>%
-        bind_rows(v$changes$reviews) %>%
+        bind_rows(v$changes$decisions) %>%
         filter(reviewer == v$email) %>%
         group_by(id) %>%
         filter(timestamp == max(timestamp)) %>%
@@ -75,33 +74,21 @@ shinyServer(
     
     tbl_data <- reactive({
       notif_tbl <- showNotification("Updating table")
-      out <- v$reviews %>%
-        bind_rows(v$changes$reviews) %>%
-        group_by(id, reviewer) %>%
-        filter(timestamp == max(timestamp)) %>%
-        group_by(id) %>%
-        summarise(Reviews = n(),
-                  Rejects = sum(accept == "Sorry"),
-                  Status = {if(input$admin_mode == "Reviewer") 
-                              tibble(reviewer, accept) %>%
-                              filter(reviewer == v$email) %>%
-                              pull(accept) %>% 
-                              {if(length(.) == 0) "None" else .}
-                            else
-                              tibble(reviewer, accept) %>%
-                              pull(accept) %>% 
-                              {if(length(.) == 0) "None" else round(mean(recode(., "Bloody ripper" = 2, "Beaut" = 1, "Okey-dokey" = 0, "Sorry" = -1)), 2)} %>%
-                              as.numeric
-                            }
-        ) %>%
-        full_join(v$data %>%
-                    rowwise %>%
-                    mutate(`Preferred format (choose 1, or more if you have no preference)` = list(strsplit(`Preferred format (choose 1, or more if you have no preference)`, ",")[[1]] %>% trimws)) %>%
-                    ungroup
-                  , by = "id") %>%
-        replace_na(list(Reviews = 0, Status = ifelse(input$admin_mode == "Reviewer", "None", 0), Rejects = 0)) %>%
+      
+      out <- v$data %>%
+        replace_na(list(`Clearly In (offer)` = 0,
+                        `Pending (may select on close of applications)` = 0, 
+                        `No offer (reject)` = 0)) %>%
         mutate(similarity = fuzzyMatching(input$text_match, .)) %>%
-        arrange(desc(similarity), Reviews)
+        arrange(desc(similarity)) %>%  
+        # check this
+        mutate(`WAM/GPA` = {  unlist(`WAM/GPA`) %>% 
+                              parse_number(., na = c("", "NA", "TBC")) %>% 
+                              replace_na(50)}) %>% 
+        mutate(`WAM/GPA` = ifelse(`WAM/GPA` < 5,`WAM/GPA`*25, `WAM/GPA`)) %>% 
+        # remove previously considered applications
+        filter(!(`Clearly In (offer)`) == 1,
+               !(`No offer (reject)`) == 1)
       
       removeNotification(notif_tbl)
       out
@@ -109,52 +96,38 @@ shinyServer(
     
     tbl_filtered_data <- reactive({
       notif_tbl <- showNotification("Filtering table")
+      
       out <- tbl_data() %>% 
-        filter(between(Reviews, input$slider_reviews[1], input$slider_reviews[2])) %>%
+        filter(between(`WAM/GPA`, input$slider_wam[1], input$slider_wam[2])) %>%
         rowwise %>%
-        filter(all(`Preferred format (choose 1, or more if you have no preference)` %in% input$pres_format)) %>%
+        filter(all(`Compl Stats Unit? Y/N` %in% input$stats_background)) %>%
         ungroup
-      if(input$filter_decisions == "On"){
-        out <- out %>%
-          anti_join(v$decisions %>%
-                      bind_rows(v$changes$decisions) %>%
-                      bind_rows(tibble(id = integer())), # Make sure that there exists an id variable
-                    by = "id"
-          )
+      
+      if (all(input$decided == "N")) {
+        out <- out %>% filter(`No offer (reject)` == 0,
+                              `Pending (may select on close of applications)` == 0,
+                              `Clearly In (offer)` == 0)
       }
+       
+        
       removeNotification(notif_tbl)
       out
     })
     
-    uploadChanges <- function(changes){
-      notif_save <- showNotification("Uploading review.")
-      if(NROW(changes$reviews) > 0){
-        gs_add_row(gs_key("11p2FCo0ZNpbovVb9u55wm7mjOpM2aOrdJCT1ohnhYC8"), ws = 2, input = changes$reviews)
-        changes$reviews <- list()
-      }
-      if(NROW(changes$decisions) > 0){
-        gs_add_row(gs_key("11p2FCo0ZNpbovVb9u55wm7mjOpM2aOrdJCT1ohnhYC8"), ws = 3, input = changes$decisions)
-        changes$decisions <- list()
-      }
-      removeNotification(notif_save)
-      return(changes)
-    }
     
     output$auth <- renderUI({
-      if (is.null(isolate(access_token()))) {
-        sidebarUserPanel(
-          span("Currently not authenticated"),
-          subtitle = a(icon("sign-in"), "Login", 
-                       href = gs_webapp_auth_url(access_type = "offline"))
-        )
-      } else {
-        sidebarUserPanel(
-          span("Authenticated as", gs_user()$user$displayName),
-          subtitle = a(icon("sign-out"), "Logout", 
-                       href = getOption("googlesheets.webapp.redirect_uri")),
-          image = fromJSON(paste0("http://picasaweb.google.com/data/entry/api/user/", gs_user()$user$emailAddress, "?alt=json"))$entry$`gphoto$thumbnail`$`$t`
-        )
+      
+      if(!gs4_has_token()){
+        # email = TRUE to match with any token in the .secrets cache
+        drive_auth(cache = ".secrets", email = "stephanie.kobakian@monash.edu")
+        gs4_auth(token = drive_token(), email = "stephanie.kobakian@monash.edu")
       }
+      
+        sidebarUserPanel(
+          # gs4_user alternative for googlesheets4
+          span("Authenticated as", gs4_user())
+        )
+      
     })
     
     ## Get auth code from return URL
@@ -178,33 +151,31 @@ shinyServer(
       if(!v$firstRun & input$btn_sync == 0 & !is.null(v$email)){
         return()
       }
-      if (!is.null(access_token())) {
+      #if (!is.null(access_token())) {
         notif_sync <- showNotification("Synchronising... Please wait", duration = NULL)
         isolate({
           ## Upload changes
           uploadChanges(v$changes)
           
+          # Applications google sheet
+          gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+          
           ## Download data
-          v$data <- gs_key("11p2FCo0ZNpbovVb9u55wm7mjOpM2aOrdJCT1ohnhYC8") %>% gs_read_csv(ws=1) %>% mutate(id = seq_len(NROW(.)))
+          v$data <- gsapps %>% 
+            # demog submission info on sheet 1
+            read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
           
-          ## Download reviews
-          v$reviews <- gs_key("11p2FCo0ZNpbovVb9u55wm7mjOpM2aOrdJCT1ohnhYC8") %>% gs_read_csv(ws=2) %>% tail(-1)
-          
-          ## Download decisions
-          v$decisions <- gs_key("11p2FCo0ZNpbovVb9u55wm7mjOpM2aOrdJCT1ohnhYC8") %>% gs_read_csv(ws=3) %>% tail(-1)
-          
-          v$email <- gs_user()$user$emailAddress
+          v$email <- gs4_user()
           v$firstRun <- FALSE
           v$lastSync <- Sys.time()
         })
         removeNotification(notif_sync)
-      }
+     # }
     })
     
     observe({
-      if(length(v$reviews) > 0){
+      if(length(v$decisions) > 0){
         dt <- tbl_data()
-        updateSliderInput(session, "slider_reviews", min = min(dt$Reviews), max = max(dt$Reviews))
       }
     })
 
@@ -213,15 +184,36 @@ shinyServer(
         ui_tbl_selector <- showNotification("Building table selector")
         
         out <- tbl_filtered_data() %>% 
-          transmute(Title = `Title of presentation`,
-                    Reviews = Reviews, 
-                    Status = Status
-          ) %>%
+          select(`M/F`,  WAM = `WAM/GPA`, 
+                 Location = `Domestic/   International`,
+                 Credit = `Applicant applied for credit? Y/N`,
+                 Qualification,
+                 Statistics = `Compl Stats Unit? Y/N`, 
+                 `No offer (reject)`, 
+                 `Pending (may select on close of applications)`, 
+                 `Clearly In (offer)`) %>% 
+          mutate(decision = case_when(`No offer (reject)` == 1 ~ "No",
+                 `Pending (may select on close of applications)` == 1 ~ "Maybe",
+                 `Clearly In (offer)` == 1 ~ "Yes")) %>% 
           datatable(rownames = FALSE, 
-                    selection = list(mode = "single", selected = which((tbl_filtered_data()%>%pull(id)) == isolate(v$ID))),
+                    selection = list(mode = "single"),
                     style = "bootstrap", 
                     class = "hover",
-                    options = list(sDom  = '<"top">irt<"bottom">p'))
+                    options = list(sDom  = '<"top">irt<"bottom">p',
+                                   scrollX = TRUE))
+       
+
+        # colour the rows by decision
+        if (any(input$decided == "Y")) {
+          out <- out %>%
+            # if decision is no
+            formatStyle("decision",
+                        target = 'row',
+            backgroundColor = styleEqual(c("No", "Maybe", "Yes", "Unknown"), 
+                                         c("red", "orange", "green", "grey"))) 
+        }
+        
+        
         removeNotification(ui_tbl_selector)
         out
       }
@@ -232,30 +224,45 @@ shinyServer(
     
     observeEvent(input$tbl_applicants_rows_selected,{
       # Update
+     
+      
       v$ID <- tbl_filtered_data() %>% 
         filter(row_number() == input$tbl_applicants_rows_selected) %>%
-        pull(id)
+        pull(`Monash ID`)
       
-      print(tbl_data() %>% 
-              filter(id == v$ID))
         
       output$abstract <- renderUI({
         if(is.null(input$tbl_applicants_rows_selected)){
           return(
-            box(title = "Select an applicant from the sidebar to review their abstract",
+            box(title = "Select an applicant from the sidebar to review their application",
                 width = 12)
           )
         }
+        
         applicant_data <- tbl_filtered_data() %>%
-          filter(id == v$ID)
+          filter(`Monash ID` == v$ID)
+        
+        # Get statement of purpose
+        pdfname <- applicant_data %>% 
+          mutate(name = paste0(Surname, ", ", `Given Name`, " ", v$ID, " ", "SoP.pdf")) %>% pull(name)
+        
+        # Download from drive if necessary
+        if (!(pdfname %in% list.files("SoP"))) {
+          ui_pdf_download <- showNotification("Downloading Statement of Purpose", duration = NULL)
+          drive_download(pdfname, path = file.path("SoP", pdfname))
+          removeNotification(ui_pdf_download)
+        }
+        
+        # Use pdf tools to extract text from statement
+        SoPtext <- pdf_text(file.path("SoP", pdfname)) %>% paste()
+        
+        # Show the Statement of Purpose
         box(
-          width = 12,
-          title = applicant_data$`Title of presentation`,
-          formText(applicant_data$`Abstract (text only, 1200 characters)`),
-          hr(),
-          formText("Keywords:", applicant_data$`Keywords (pick at least one)`),
-          formText("Format(s):", paste0(applicant_data$`Preferred format (choose 1, or more if you have no preference)`[[1]], collapse=", "))
-        )
+          width = "500px",
+          title = "Statement of Purpose",
+          formText(SoPtext),
+          hr())
+        
       })
       
       
@@ -263,30 +270,28 @@ shinyServer(
         if(is.null(input$tbl_applicants_rows_selected)){
           return()
         }
-        review_data <- if(input$admin_mode == "Administrator") latest_decisions() else latest_reviews()
-        review_data <- review_data %>% filter(id == v$ID)
-        print(review_data)
+        
         box(width = 12,
-            title = ifelse(input$admin_mode == "Administrator", "Decision", "Review"),
+            title = "Decision",
             solidHeader = TRUE,
             status = "info",
-            column(2,
+            column(3,
                    radioButtons("accept", 
-                                label = "Decision", 
-                                choices = c("Bloody ripper", "Beaut", "Okey-dokey", "Sorry"), 
-                                selected = ifelse(length(review_data %>% pull(accept))==1, review_data %>% pull(accept), "Okey-dokey")
+                                label = "Select One:", 
+                                choices = c("Offer", "Maybe", "Reject"),
+                                selected = "Maybe"
                    ),
                    uiOutput("ui_save")
             ),
-            column(10,
+            column(9,
                    textAreaInput("comment",
                                  label = "Comments", 
-                                 value = ifelse(length(review_data %>% pull(comment))==1, review_data %>% pull(comment), ""), 
                                  rows = 6
                   )
             )
         )
       })
+      
       
       output$ui_save <- renderUI({
         actionLink(
@@ -295,82 +300,72 @@ shinyServer(
             p("Save", style="text-align: center;"),
             width = NULL,
             background = switch(input$accept,
-                                `Bloody ripper` = "green",
-                                Beaut = "light-blue",
-                                `Okey-dokey` = "orange",
-                                Sorry = "red")
+                                `Clearly In` = "green",
+                                Pending = "light-blue",
+                                Reject = "red")
           )
         )
       })
       
-      
-      output$feedback <- renderUI({
-        if(is.null(input$tbl_applicants_rows_selected) | input$admin_mode == "Reviewer"){
-          return()
-        }
-        
-        review_data <- v$reviews %>%
-          bind_rows(v$changes$reviews) %>%
-          filter(id == v$ID) %>%
-          group_by(reviewer) %>%
-          filter(timestamp == max(timestamp)) %>%
-          ungroup
-        
-        decision_data <- v$decisions %>%
-          bind_rows(v$changes$decisions) %>%
-          filter(id == v$ID) %>%
-          filter(timestamp == max(timestamp)) %>%
-          mutate(reviewer = "Decision")
-        
-        decision_data %>%
-          bind_rows(review_data) %>%
-          split(seq_len(NROW(.))) %>% 
-          map(~ box(width = 6,
-                    title = .$reviewer,
-                    background = switch(.$accept,
-                                        `Bloody ripper` = "green",
-                                        Beaut = "light-blue",
-                                        `Okey-dokey` = "orange",
-                                        Sorry = "red"),
-                    formText(.$accept, ": ", .$comment)))%>%
-          do.call("tagList", .) %>%
-          fluidRow()
-      })
+
     })
     
     observeEvent(input$save, {
-      if(input$admin_mode == "Administrator"){
-        v$changes$decisions <- v$changes$decisions %>%
-          bind_rows(
-            tibble(
-              id = v$ID,
-              timestamp = format(Sys.time(), tz="GMT"),
-              reviewer = v$email,
-              accept = input$accept,
-              comment = input$comment
-            )
-          )
-      }
-      else{
-        v$changes$reviews <- v$changes$reviews %>%
-          bind_rows(
-            tibble(
-              id = v$ID,
-              timestamp = format(Sys.time(), tz="GMT"),
-              reviewer = v$email,
-              accept = input$accept,
-              comment = input$comment
-            )
-          )
-      }
-      if(input$net_mode == "Online"){
-        v$reviews <- v$reviews %>%
-          bind_rows(v$changes$reviews)
-        v$decisions <- v$decisions %>%
-          bind_rows(v$changes$decisions)
-        v$changes <- uploadChanges(v$changes)
-      }
+      
+      # Get row for review
+      new_decision <- v$data %>% 
+        filter(`Monash ID` == v$ID) %>% 
+        mutate(`Owner & Date` = paste(format(Sys.time(), tz="GMT"), v$email),
+               `Clearly In (offer)` = 
+                 ifelse(input$accept == "Offer", 1, 0),
+               `Pending (may select on close of applications)`= 
+                 ifelse(input$accept == "Maybe", 1, 0),
+               `No offer (reject)` = 
+                 ifelse(input$accept == "Reject", 1, 0),
+               Query = input$comment)
+      
+      # Add to list of changes
+      v$decisions <- new_decision
+      
+      # upload decision to spreadsheet
+      v$changes <- uploadChanges(changes = v$decisions)
+        
     })
+    
+    
+    # Upload changes to the google sheet
+    uploadChanges <- function(changes){
+      
+      notif_save <- showNotification("Uploading review.")
+      if(NROW(changes) > 0){
+        # find row of data to replace based on ID, allow for headers in A and B
+        replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
+        
+        # Remove row without a decision
+        range_delete(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", range = replacing_row)
+        
+        # Remove the id column
+        changes <- changes %>% select(-id)
+        
+        # Add the decision to the data set
+        sheet_append(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI",           data = changes)
+        
+        # Get the new updated data
+        gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        
+        ## Download data
+        v$data <- gsapps %>% 
+          # demog submission info on sheet 1
+          read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
+        
+        
+        # Clear changes 
+        changes <- list()
+        
+      }
+      removeNotification(notif_save)
+      return(changes)
+    }
     
 
     observeEvent(input$btn_debug, {
