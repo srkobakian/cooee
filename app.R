@@ -5,8 +5,7 @@ if(any(missing_packages)){
        install.packages(c("', paste0(required_packages[missing_packages], collapse = '", "'), '"))'))
 }
 
-# Set up authentication with Tidyverse API packages
-
+dark_theme_void <- theme_void() + theme()
 
 library(shiny)
 runApp(port = 4642)

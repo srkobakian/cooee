@@ -7,13 +7,14 @@ library(jsonlite)
 library(purrr)
 library(googledrive)
 library(pdftools)
+library(ggplot2)
+library(glue)
 
 
 
 shinyServer(
   function(input, output, session) {
     source("helpers.R")
-    
     
     # load in previous decisions if there is a cache
     if("cache_abstracts.Rdata" %in% list.files()){
@@ -34,7 +35,7 @@ shinyServer(
       v <- reactiveValues(
         data = list(),
         decisions = list(),
-        changes = list(decisions = list()),
+        statements = list(),
         online = FALSE,
         lastSync = "Never",
         ID = 1,
@@ -50,20 +51,8 @@ shinyServer(
       notif_data <- showNotification("Constructing dataset")
       out <- v$decisions %>%
         as_tibble %>%
-        bind_rows(v$changes$decisions) %>%
+        bind_rows(v$decisions) %>%
         filter(reviewer == v$email) %>%
-        group_by(id) %>%
-        filter(timestamp == max(timestamp)) %>%
-        ungroup
-      removeNotification(notif_data)
-      out
-    })
-    
-    latest_decisions <- reactive({
-      notif_data <- showNotification("Constructing dataset")
-      out <- v$decisions %>%
-        as_tibble %>%
-        bind_rows(v$changes$decisions) %>%
         group_by(id) %>%
         filter(timestamp == max(timestamp)) %>%
         ungroup
@@ -128,6 +117,56 @@ shinyServer(
           span("Authenticated as", gs4_user())
         )
       
+    })  
+    
+    output$countryplot <- renderPlot({
+      # Applicant origin
+      # Visual summary
+      
+      tbl_data() %>% ggplot() + 
+        geom_bar(aes(x = 1, fill = `Domestic/   International`), show.legend = FALSE) +           scale_fill_viridis_d() + coord_flip() +
+        theme_void() + 
+        theme(panel.background = element_rect(fill = "darkgrey"))
+      
+      })
+      
+    output$countrytext <- DT::renderDataTable({
+      
+      tbl_data() %>% count(Origin = `Domestic/   International`, name = "Total") %>%
+        datatable(rownames = FALSE, 
+                  filter = 'top',
+                  selection = 'none',
+                  style = "bootstrap", 
+                  options = list(sDom  = '<"top">irt<"bottom">p',
+                                 pageLength = 2, # make this a variable
+                                 lengthChange = FALSE,
+                                 scrollX = TRUE))
+      
+    })
+    
+    output$genderplot <- renderPlot({
+      # Applicant origin
+      # Visual summary
+      
+      tbl_data() %>% ggplot() + 
+        geom_bar(aes(x = 1, fill = `M/F`), show.legend = FALSE) +           scale_fill_viridis_d() + coord_flip() +
+        theme_void() + 
+        theme(panel.background = element_rect(fill = "darkgrey"))
+      
+    })
+    
+    output$gendertext <- DT::renderDataTable({
+      
+      tbl_data() %>% count(Gender = `M/F`, name = "Total") %>%
+        datatable(rownames = FALSE, 
+                  filter = 'top',
+                  selection = 'none',
+                  style = "bootstrap", 
+                  options = list(sDom  = '<"top">irt<"bottom">p',
+                                 pageLength = 2, # make this a variable
+                                 lengthChange = FALSE,
+                                 scrollX = TRUE))
+      
     })
     
     ## Get auth code from return URL
@@ -151,11 +190,13 @@ shinyServer(
       if(!v$firstRun & input$btn_sync == 0 & !is.null(v$email)){
         return()
       }
+      
       #if (!is.null(access_token())) {
-        notif_sync <- showNotification("Synchronising... Please wait", duration = NULL)
+        notif_sync <- showNotification("Synchronising... Please wait",
+                                       duration = NULL)
+        
+        
         isolate({
-          ## Upload changes
-          uploadChanges(v$changes)
           
           # Applications google sheet
           gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
@@ -169,10 +210,36 @@ shinyServer(
           v$firstRun <- FALSE
           v$lastSync <- Sys.time()
         })
+        
+        # pull new statements
+        current_sops <- list.files("SoP/") %>% 
+          tibble() %>% 
+          mutate(files = parse_number(.))
+        
+        if (any(v$data$`Monash ID` %in% current_sops$files)) {
+          
+          # get the list of missing SoPs
+          to_get <- v$data$`Monash ID`[!(v$data$`Monash ID` %in% current_sops$files)]
+          
+          # Download from drive
+            ui_pdf_download <- showNotification("Downloading Statements of Purpose", duration = NULL)
+            
+            if (length(to_get) > 0){
+            pdfnames <- v$data %>% 
+              filter(`Monash ID` %in% to_get) %>% 
+              mutate(name = paste0(Surname, ", ", `Given Name`, " ", `Monash ID`, " ", "SoP.pdf")) %>% pull(name)
+            
+            lapply(pdfnames, FUN = filedownload)
+            }
+            
+            removeNotification(ui_pdf_download)
+          }
+          
+          
         removeNotification(notif_sync)
      # }
     })
-    
+     
     observe({
       if(length(v$decisions) > 0){
         dt <- tbl_data()
@@ -195,6 +262,9 @@ shinyServer(
           mutate(decision = case_when(`No offer (reject)` == 1 ~ "No",
                  `Pending (may select on close of applications)` == 1 ~ "Maybe",
                  `Clearly In (offer)` == 1 ~ "Yes")) %>% 
+          select(-`No offer (reject)`, 
+                 -`Pending (may select on close of applications)`, 
+                 -`Clearly In (offer)`) %>% 
           datatable(rownames = FALSE, 
                     selection = list(mode = "single"),
                     style = "bootstrap", 
@@ -246,13 +316,7 @@ shinyServer(
         pdfname <- applicant_data %>% 
           mutate(name = paste0(Surname, ", ", `Given Name`, " ", v$ID, " ", "SoP.pdf")) %>% pull(name)
         
-        # Download from drive if necessary
-        if (!(pdfname %in% list.files("SoP"))) {
-          ui_pdf_download <- showNotification("Downloading Statement of Purpose", duration = NULL)
-          drive_download(pdfname, path = file.path("SoP", pdfname))
-          removeNotification(ui_pdf_download)
-        }
-        
+        # Replace with pulling text from reactive value list
         # Use pdf tools to extract text from statement
         SoPtext <- pdf_text(file.path("SoP", pdfname)) %>% paste()
         
@@ -360,17 +424,52 @@ shinyServer(
         
         
         # Clear changes 
-        changes <- list()
+        v$changes <- list()
         
       }
       removeNotification(notif_save)
       return(changes)
     }
     
+    
+    output$summaries <- renderUI({
+      
+      input$text_match
+      
+      
+      # analyse text from Statements
+      # Read in all statements
+      current_statements <- v$statements$names
+        browser()
+        # get the list of missing SoPs
+        to_get <- v$data$`Monash ID`[!(v$data$`Monash ID` %in% current_statements)]
+        
+        if (length(to_get) > 0){
+          pdfnames <- v$data %>% 
+            filter(`Monash ID` %in% to_get) %>% 
+            mutate(name = 
+                     paste0(Surname, ", ", `Given Name`, " ",
+                            `Monash ID`, " ", "SoP.pdf")) %>% 
+            pull(name)
+          
+          
+        # Use pdf tools to extract text from statement
+        v$statements <- purrr::map(pdfnames, function(a){
+          file.path("SoP", a) %>% pdf_text() %>% paste()})
+        
+        
+        v$statement_ids <- to_get
+        # Will have to join to previous list of statements
+        # fairly quick to pull the text if we cannot concatenate
+        }
+      
+    })
+    
 
     observeEvent(input$btn_debug, {
       browser()
     })
+    
     
     onStop(function(){
       cache <- isolate(reactiveValuesToList(v))

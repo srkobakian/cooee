@@ -13,6 +13,7 @@ formText <- function(...){
 }
 
 fuzzyMatching <- function(pattern, dataset){
+  browser()
   if(pattern == ""){
     return(0)
   }
@@ -22,3 +23,17 @@ fuzzyMatching <- function(pattern, dataset){
     map_dbl(~ sum(agrepl(gsub(" ", "|", pattern), .))/length(.))
 }
 
+# download a single file, allow a reasonable return value
+# allow downloads to continue and report errors if found
+
+filedownload <- function(name){
+  out <- tryCatch(
+    {drive_download(name, path = file.path("SoP", name))},
+    error = function(cond) {
+      message("Check that the file exists on the drive:")
+      message(paste("Error: file name does not identify at least one Drive file."))
+      return(NA)
+    })
+  }
+
+  
