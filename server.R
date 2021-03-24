@@ -8,16 +8,25 @@ library(tidyverse)
 library(tidytext)
 library(topicmodels)
 
+#email_address <- "dicook@monash.edu"
+email_address <- "stephanie.kobakian@monash.edu"
+#gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
+gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
+# sheet_num <- 2 # Worksheet used for application summary
+sheet_num <- 1 # Worksheet
+
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
 
     source("helpers.R")
     
-    drive_auth(email = "stephanie.kobakian@monash.edu")
+    #drive_auth(email = "stephanie.kobakian@monash.edu")
     #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
-    gs4_auth(email = "stephanie.kobakian@monash.edu", token = drive_token())
+    #gs4_auth(email = "stephanie.kobakian@monash.edu", token = drive_token())
+    drive_auth(email = email_address)
+    #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
+    gs4_auth(email = email_address, token = drive_token())
     
-
     v <- reactiveValues(
         data = list(),
         decisions = list(),
@@ -36,13 +45,14 @@ shinyServer(function(input, output, session) {
         cat(file=stderr(), "Get sheet\n")
         notif_data <- showNotification("Constructing dataset")
         # Applications google sheet
-        gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        #gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        gsapps <- gs4_get(gsheet)
         
         ## Download data
         cat(file=stderr(), "Get data from sheet\n")
         v$data <- gsapps %>% 
             # demog submission info on sheet 1
-            read_sheet(sheet = 1) %>% tail(-1) %>% 
+            read_sheet(sheet = sheet_num) %>% tail(-1) %>% 
             mutate(id = seq_len(NROW(.)))
         
         v$email <- gs4_user()
@@ -59,7 +69,7 @@ shinyServer(function(input, output, session) {
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", `Given Name`, " ",
-                              `Monash ID`, " ", "SoP.pdf")) %>% 
+                              `Monash ID`, " - ", "SoP.pdf")) %>% 
             pull(name)
         
         # names of current statements
@@ -269,21 +279,21 @@ shinyServer(function(input, output, session) {
             replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
             
             # Remove row without a decision
-            range_delete(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", range = replacing_row)
+            range_delete(ss = gsheet, range = replacing_row)
             
             # Remove the id column
             changes <- changes %>% select(-id)
             
             # Add the decision to the data set
-            sheet_append(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", data = changes)
+            sheet_append(ss = gsheet, data = changes)
             
             # Get the new updated data
-            gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+            gsapps <- gs4_get(gsheet)
             
             ## Download data
             v$data <- gsapps %>% 
                 # demog submission info on sheet 1
-                read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
+                read_sheet(sheet = sheet_num) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
             
             
             # Clear changes 
