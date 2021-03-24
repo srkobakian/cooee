@@ -1,85 +1,68 @@
+#
+# This is the user-interface definition of a Shiny web application. You can
+# run the application by clicking 'Run App' above.
+#
+# Find out more about building applications with Shiny here:
+#
+#    http://shiny.rstudio.com/
+#
+
 library(shiny)
 library(shinydashboard)
-library(googlesheets)
 
+# Define UI for application that draws a histogram
 shinyUI(
-  dashboardPage(
-    dashboardHeader(
-      title = "MBAT Application Review",
-      titleWidth = "475px"
-    ),
-    dashboardSidebar(
-      width = "475px",
-      uiOutput("auth"),
-      uiOutput("sync"),
-      #radioButtons("net_mode", "Net Mode", c("Online", "Offline"), inline = TRUE),
-      #radioButtons("admin_mode", "Operation Mode", c("Reviewer", "Administrator"), inline = TRUE),
-      sidebarMenu(
-        
-        menuItem("Application Summaries", tabName = "summaries", icon = icon("dashboard")),
-        menuItem("Application Filtering", tabName = "applications", icon = icon("th")),
-        
-        tags$li(
-          actionLink("btn_debug",
-                     style = "margin: 0;",
-                     label = NULL,
-                     class = "",
-                     icon("bug"),
-                     span("Debug")
-          )
+    dashboardPage(
+        dashboardHeader(
+            title = "MBAT Application Review",
+            titleWidth = "375px"
         ),
-        tags$li(
-          actionLink("btn_sync",
-                     style = "margin: 0;",
-                     label = NULL,
-                     class = "",
-                     icon("refresh"),
-                     span("Synchronise")
-          )
-        )
-      )
-      # uiOutput("n_entries"),
-    ),
-    dashboardBody( 
-      tabItems(
-        # First tab for interacting
-        tabItem(tabName = "summaries",
-                tags$head(
-                  tags$link(rel = "stylesheet", 
-                            type = "text/css", 
-                            href = "custom.css")),
+        dashboardSidebar(
+            width = "375px",
+            sidebarMenu(
+                id = "tabs",
+                
                 
                 textInput("text_match", "Fuzzy text sorting"),
+                sliderInput("slider_wam", "WAM",
+                            min = 50, max = 100, value = c(50, 100), step=5),
                 
-                uiOutput("summaries")
+                checkboxGroupInput("stats_background", "Statistics\nBackground", choices = c("Y", "N"), selected = c("Y", "N")),
+                
+                menuItem("Application Summaries", tabName = "summaries", icon = icon("dashboard")),
+                
+                menuItem("Application View", tabName = "abstract", icon = icon("dashboard"))
+            )
         ),
-        tabItem(tabName = "Application View",
+        
+        dashboardBody( 
+            tabItems(
+                # First tab for interacting
+                tabItem(tabName = "summaries",
+                        
+                        h1("Applications"),
+                        # data table of commonly used words
+                        DT::DTOutput("tblapplicants"),
+                        
+                        h1("Commonly used words in applications"),
+                        # data table of commonly used words
+                        DT::DTOutput("commonwords"),
+                        
+                        h1("Topics mentioned"),
+                        # filter according to search term
+                        plotOutput("lda"),
+                        
+                        h1("Unique words used in statements"),
+                        # data table of unique words found
+                        plotOutput("uniquewords")
+                        
+                ),
                 
+                
+                tabItem(tabName = "abstract",
                 uiOutput("abstract"),
-                uiOutput("review")
-                ),
-        # second tab to display the applications
-        tabItem(tabName = "applications",
-                
-                
-                fluidRow(
-                  column(4, 
-                  plotOutput("countryplot", width = "300px", height = "50px"),
-                  dataTableOutput("countrytext")),
-                  column(4, 
-                  plotOutput("genderplot", width = "300px", height = "50px"),
-                  dataTableOutput("gendertext"))),
-                
-                hr("Filter and choose applications"),
-                fluidRow(
-                  column(4, checkboxGroupInput("decided", "Decision\nmade", choices = c("Y", "N"), selected = "N")),
-                  column(4, checkboxGroupInput("stats_background", "Statistics\nBackground", choices = c("Y", "N"), selected = c("Y", "N"))),
-                  column(4, sliderInput("slider_wam", "WAM",
-                                        min = 50, max = 100, value = c(50, 100), step=5))
-                ),
-                DT::dataTableOutput("tbl_applicants")
+                uiOutput("review"))
+            )
         )
-      )
     )
-  )
 )

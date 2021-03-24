@@ -1,338 +1,216 @@
 library(shiny)
-library(tidyverse)
+library(shinydashboard)
 library(googledrive)
 library(googlesheets4)
 library(DT)
-library(jsonlite)
-library(purrr)
-library(googledrive)
 library(pdftools)
-library(ggplot2)
-library(glue)
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
 
+# Define server logic required to draw a histogram
+shinyServer(function(input, output, session) {
 
-
-shinyServer(
-  function(input, output, session) {
     source("helpers.R")
     
-    # load in previous decisions if there is a cache
-    if("cache_abstracts.Rdata" %in% list.files()){
-      notif_cache <- showNotification("Loading cache")
-      load("cache_abstracts.Rdata")
-      
-      if(exists("v")){
-        if(is.reactivevalues(v)){
-          # Update cache format
-          cache <- isolate(reactiveValuesToList(v))
-        }
-      }
-      v <- do.call(reactiveValues, cache)
-      
-      removeNotification(notif_cache)
-    }
-    else{
-      v <- reactiveValues(
+    drive_auth(email = "stephanie.kobakian@monash.edu")
+    #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
+    gs4_auth(email = "stephanie.kobakian@monash.edu", token = drive_token())
+    
+
+    v <- reactiveValues(
         data = list(),
         decisions = list(),
         statements = list(),
+        statements_names = list(),
         online = FALSE,
         lastSync = "Never",
         ID = 1,
         email = "none",
         firstRun = TRUE
-      )
-    }
+    )
     
+    #Access the google sheet
+    isolate({
+        
+        cat(file=stderr(), "Get sheet\n")
+        notif_data <- showNotification("Constructing dataset")
+        # Applications google sheet
+        gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        
+        ## Download data
+        cat(file=stderr(), "Get data from sheet\n")
+        v$data <- gsapps %>% 
+            # demog submission info on sheet 1
+            read_sheet(sheet = 1) %>% tail(-1) %>% 
+            mutate(id = seq_len(NROW(.)))
+        
+        v$email <- gs4_user()
+        v$firstRun <- FALSE
+        v$lastSync <- Sys.time()
+        
+        # Pull Statements
+        
+        # analyse text from Statements
+        # Read in all statements
+        cat(file=stderr(), "Get text from statements\n")
+        
+        # names of all statements
+        pdfnames <- v$data %>% 
+            mutate(name = 
+                       paste0(Surname, ", ", `Given Name`, " ",
+                              `Monash ID`, " ", "SoP.pdf")) %>% 
+            pull(name)
+        
+        # names of current statements
+        current_statements <- list.files("SoP/")
+                
+        # get the list of missing SoPs
+        to_get <- pdfnames[!(pdfnames %in% current_statements)]
+        #    filter(`Monash ID` %in% to_get) %>% 
+        
+        # Download statements
+        dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
     
-    notif_ui <- showNotification("Building UI")
+        if (length(to_get)>0){    
+        downloads <- lapply(to_get, FUN = filedownload)
+        }
     
-    latest_decisions <- reactive({
-      notif_data <- showNotification("Constructing dataset")
-      out <- v$decisions %>%
-        as_tibble %>%
-        bind_rows(v$decisions) %>%
-        filter(reviewer == v$email) %>%
-        group_by(id) %>%
-        filter(timestamp == max(timestamp)) %>%
-        ungroup
-      removeNotification(notif_data)
-      out
-    })
-    
-    
-    tbl_data <- reactive({
-      notif_tbl <- showNotification("Updating table")
-      
-      out <- v$data %>%
-        replace_na(list(`Clearly In (offer)` = 0,
-                        `Pending (may select on close of applications)` = 0, 
-                        `No offer (reject)` = 0)) %>%
-        mutate(similarity = fuzzyMatching(input$text_match, .)) %>%
-        arrange(desc(similarity)) %>%  
-        # check this
-        mutate(`WAM/GPA` = {  unlist(`WAM/GPA`) %>% 
-                              parse_number(., na = c("", "NA", "TBC")) %>% 
-                              replace_na(50)}) %>% 
-        mutate(`WAM/GPA` = ifelse(`WAM/GPA` < 5,`WAM/GPA`*25, `WAM/GPA`)) %>% 
-        # remove previously considered applications
-        filter(!(`Clearly In (offer)`) == 1,
-               !(`No offer (reject)`) == 1)
-      
-      removeNotification(notif_tbl)
-      out
+        # Use pdf tools to extract text from statement
+        v$statements <- statements <- purrr::map(pdfnames, function(a){
+            file.path("SoP", a) %>% pdf_text() %>% str_trim() %>% toString()})
+        
+        # make sure amount of statements match data for student submissions
+        v$statement_names <- list.files("SoP/")
+        
+        
+        removeNotification(dl_sop)
+        
+        removeNotification(notif_data)
     })
     
     tbl_filtered_data <- reactive({
-      notif_tbl <- showNotification("Filtering table")
-      
-      out <- tbl_data() %>% 
-        filter(between(`WAM/GPA`, input$slider_wam[1], input$slider_wam[2])) %>%
-        rowwise %>%
-        filter(all(`Compl Stats Unit? Y/N` %in% input$stats_background)) %>%
-        ungroup
-      
-      if (all(input$decided == "N")) {
-        out <- out %>% filter(`No offer (reject)` == 0,
-                              `Pending (may select on close of applications)` == 0,
-                              `Clearly In (offer)` == 0)
-      }
-       
+        notif_tbl <- showNotification("Filtering table")
         
-      removeNotification(notif_tbl)
-      out
-    })
-    
-    
-    output$auth <- renderUI({
-      
-      if(!gs4_has_token()){
-        # email = TRUE to match with any token in the .secrets cache
-        drive_auth(cache = ".secrets", email = "stephanie.kobakian@monash.edu")
-        gs4_auth(token = drive_token(), email = "stephanie.kobakian@monash.edu")
-      }
-      
-        sidebarUserPanel(
-          # gs4_user alternative for googlesheets4
-          span("Authenticated as", gs4_user())
-        )
-      
-    })  
-    
-    output$countryplot <- renderPlot({
-      # Applicant origin
-      # Visual summary
-      
-      tbl_data() %>% ggplot() + 
-        geom_bar(aes(x = 1, fill = `Domestic/   International`), show.legend = FALSE) +           scale_fill_viridis_d() + coord_flip() +
-        theme_void() + 
-        theme(panel.background = element_rect(fill = "darkgrey"))
-      
-      })
-      
-    output$countrytext <- DT::renderDataTable({
-      
-      tbl_data() %>% count(Origin = `Domestic/   International`, name = "Total") %>%
-        datatable(rownames = FALSE, 
-                  filter = 'top',
-                  selection = 'none',
-                  style = "bootstrap", 
-                  options = list(sDom  = '<"top">irt<"bottom">p',
-                                 pageLength = 2, # make this a variable
-                                 lengthChange = FALSE,
-                                 scrollX = TRUE))
-      
-    })
-    
-    output$genderplot <- renderPlot({
-      # Applicant origin
-      # Visual summary
-      
-      tbl_data() %>% ggplot() + 
-        geom_bar(aes(x = 1, fill = `M/F`), show.legend = FALSE) +           scale_fill_viridis_d() + coord_flip() +
-        theme_void() + 
-        theme(panel.background = element_rect(fill = "darkgrey"))
-      
-    })
-    
-    output$gendertext <- DT::renderDataTable({
-      
-      tbl_data() %>% count(Gender = `M/F`, name = "Total") %>%
-        datatable(rownames = FALSE, 
-                  filter = 'top',
-                  selection = 'none',
-                  style = "bootstrap", 
-                  options = list(sDom  = '<"top">irt<"bottom">p',
-                                 pageLength = 2, # make this a variable
-                                 lengthChange = FALSE,
-                                 scrollX = TRUE))
-      
-    })
-    
-    ## Get auth code from return URL
-    access_token  <- reactive({
-      ## gets all the parameters in the URL. The auth code should be one of them.
-      pars <- parseQueryString(session$clientData$url_search)
-      if (length(pars$code) > 0) {
-        ## extract the authorization code
-        notif_auth <- showNotification("Authenticating...")
-        out <- gs_webapp_get_token(auth_code = pars$code)
-        removeNotification(notif_auth)
+        cat(file=stderr(), "Filter data for table\n")
+        out <- v$data %>%
+            replace_na(list(`Clearly In (offer)` = 0,
+                            `Pending (may select on close of applications)` = 0, 
+                            `No offer (reject)` = 0)) %>%
+            mutate(similarity = fuzzyMatching(input$text_match, .)) %>%
+            arrange(desc(similarity)) %>%  
+            # check this
+            mutate(`WAM/GPA` = {  unlist(`WAM/GPA`) %>% 
+                    parse_number(., na = c("", "NA", "TBC")) %>% 
+                    replace_na(50)}) %>% 
+            mutate(`WAM/GPA` = ifelse(`WAM/GPA` < 5,`WAM/GPA`*25, `WAM/GPA`)) %>% 
+            # remove previously considered applications
+            filter(!(`Clearly In (offer)`) == 1,
+                   !(`No offer (reject)`) == 1) %>% 
+            filter(between(`WAM/GPA`, input$slider_wam[1], input$slider_wam[2])) %>%
+            rowwise %>%
+            filter(all(`Compl Stats Unit? Y/N` %in% input$stats_background)) %>%
+            ungroup
+        
+        if (all(input$decided == "N")) {
+            out <- out %>% filter(`No offer (reject)` == 0,
+                                  `Pending (may select on close of applications)` == 0,
+                                  `Clearly In (offer)` == 0)
+        }
+        
+        
+        removeNotification(notif_tbl)
         out
-      }
     })
     
-    output$sync <- renderUI({
-      strong(paste0("Last synchronised: ", v$lastSync))
+    output$tblapplicants <- DT::renderDT({
+        
+        cat(file=stderr(), "Construct Datatable\n")
+        notif_table <- showNotification("Constructing datatable")
+        
+        tbl_filtered_data() %>% 
+            select(`M/F`,  WAM = `WAM/GPA`, 
+                   Location = `Domestic/   International`,
+                   Credit = `Applicant applied for credit? Y/N`,
+                   Qualification,
+                   Statistics = `Compl Stats Unit? Y/N`, 
+                   `No offer (reject)`, 
+                   `Pending (may select on close of applications)`, 
+                   `Clearly In (offer)`) %>% 
+            mutate(decision = case_when(`No offer (reject)` == 1 ~ "No",
+                                        `Pending (may select on close of applications)` == 1 ~ "Maybe",
+                                        `Clearly In (offer)` == 1 ~ "Yes")) %>% 
+            select(-`No offer (reject)`, 
+                   -`Pending (may select on close of applications)`, 
+                   -`Clearly In (offer)`) %>% 
+            datatable(rownames = FALSE, 
+                      selection = list(mode = "single"),
+                      style = "bootstrap", 
+                      class = "hover",
+                      options = list(sDom  = '<"top">irt<"bottom">p',
+                                     scrollX = TRUE))
+        
     })
 
-    observe({
-      if(!v$firstRun & input$btn_sync == 0 & !is.null(v$email)){
-        return()
-      }
-      
-      #if (!is.null(access_token())) {
-        notif_sync <- showNotification("Synchronising... Please wait",
-                                       duration = NULL)
+    # UI for commonly used words
+    #output$commonwords <- 
+    
+    
+    
+    
+    
+    # UI for abstract
+    output$abstract <- renderUI({
+        if(is.null(input$tblapplicants_rows_selected)){
+            return(
+                box(title = "Select an applicant from the sidebar to review their application",
+                    width = 12)
+            )
+        }
+        
+    })
+    
+    # UI for abstract updated when selected
+    observeEvent(input$tblapplicants_rows_selected,{
         
         
-        isolate({
-          
-          # Applications google sheet
-          gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
-          
-          ## Download data
-          v$data <- gsapps %>% 
-            # demog submission info on sheet 1
-            read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
-          
-          v$email <- gs4_user()
-          v$firstRun <- FALSE
-          v$lastSync <- Sys.time()
-        })
+        updateTabItems(session, "tabs", "abstract")
         
-        # pull new statements
-        current_sops <- list.files("SoP/") %>% 
-          tibble() %>% 
-          mutate(files = parse_number(.))
+        v$ID <- tbl_filtered_data() %>% 
+            filter(row_number() == input$tblapplicants_rows_selected) %>%
+            pull(`Monash ID`)
         
-        if (any(v$data$`Monash ID` %in% current_sops$files)) {
-          
-          # get the list of missing SoPs
-          to_get <- v$data$`Monash ID`[!(v$data$`Monash ID` %in% current_sops$files)]
-          
-          # Download from drive
-            ui_pdf_download <- showNotification("Downloading Statements of Purpose", duration = NULL)
-            
-            if (length(to_get) > 0){
-            pdfnames <- v$data %>% 
-              filter(`Monash ID` %in% to_get) %>% 
-              mutate(name = paste0(Surname, ", ", `Given Name`, " ", `Monash ID`, " ", "SoP.pdf")) %>% pull(name)
-            
-            lapply(pdfnames, FUN = filedownload)
+        
+        output$abstract <- renderUI({
+            if(is.null(input$tblapplicants_rows_selected)){
+                return(
+                    box(title = "Select an applicant from the sidebar to review their application",
+                        width = 12)
+                )
             }
             
-            removeNotification(ui_pdf_download)
-          }
-          
-          
-        removeNotification(notif_sync)
-     # }
-    })
-     
-    observe({
-      if(length(v$decisions) > 0){
-        dt <- tbl_data()
-      }
-    })
-
-    output$tbl_applicants <- DT::renderDataTable({
-      if(NROW(v$data) > 0){
-        ui_tbl_selector <- showNotification("Building table selector")
-        
-        out <- tbl_filtered_data() %>% 
-          select(`M/F`,  WAM = `WAM/GPA`, 
-                 Location = `Domestic/   International`,
-                 Credit = `Applicant applied for credit? Y/N`,
-                 Qualification,
-                 Statistics = `Compl Stats Unit? Y/N`, 
-                 `No offer (reject)`, 
-                 `Pending (may select on close of applications)`, 
-                 `Clearly In (offer)`) %>% 
-          mutate(decision = case_when(`No offer (reject)` == 1 ~ "No",
-                 `Pending (may select on close of applications)` == 1 ~ "Maybe",
-                 `Clearly In (offer)` == 1 ~ "Yes")) %>% 
-          select(-`No offer (reject)`, 
-                 -`Pending (may select on close of applications)`, 
-                 -`Clearly In (offer)`) %>% 
-          datatable(rownames = FALSE, 
-                    selection = list(mode = "single"),
-                    style = "bootstrap", 
-                    class = "hover",
-                    options = list(sDom  = '<"top">irt<"bottom">p',
-                                   scrollX = TRUE))
-       
-
-        # colour the rows by decision
-        if (any(input$decided == "Y")) {
-          out <- out %>%
-            # if decision is no
-            formatStyle("decision",
-                        target = 'row',
-            backgroundColor = styleEqual(c("No", "Maybe", "Yes", "Unknown"), 
-                                         c("red", "orange", "green", "grey"))) 
-        }
-        
-        
-        removeNotification(ui_tbl_selector)
-        out
-      }
-      else{
-        NULL
-      }
+            applicant_data <- tbl_filtered_data() %>%
+                filter(`Monash ID` == v$ID)
+            
+            # Get statement of purpose
+            pdfname <- applicant_data %>% 
+                mutate(name = paste0(Surname, ", ", `Given Name`, " ", v$ID, " ", "SoP.pdf")) %>% pull(name)
+            
+            # Show the Statement of Purpose
+            box(
+                width = "500px",
+                title = "Statement of Purpose",
+                formText(SoPtext),
+                hr())
+            
+        })  
     })
     
-    observeEvent(input$tbl_applicants_rows_selected,{
-      # Update
-     
-      
-      v$ID <- tbl_filtered_data() %>% 
-        filter(row_number() == input$tbl_applicants_rows_selected) %>%
-        pull(`Monash ID`)
-      
-        
-      output$abstract <- renderUI({
-        if(is.null(input$tbl_applicants_rows_selected)){
-          return(
-            box(title = "Select an applicant from the sidebar to review their application",
-                width = 12)
-          )
-        }
-        
-        applicant_data <- tbl_filtered_data() %>%
-          filter(`Monash ID` == v$ID)
-        
-        # Get statement of purpose
-        pdfname <- applicant_data %>% 
-          mutate(name = paste0(Surname, ", ", `Given Name`, " ", v$ID, " ", "SoP.pdf")) %>% pull(name)
-        
-        # Replace with pulling text from reactive value list
-        # Use pdf tools to extract text from statement
-        SoPtext <- pdf_text(file.path("SoP", pdfname)) %>% paste()
-        
-        # Show the Statement of Purpose
-        box(
-          width = "500px",
-          title = "Statement of Purpose",
-          formText(SoPtext),
-          hr())
-        
-      })
-      
-      
-      output$review <- renderUI({
-        if(is.null(input$tbl_applicants_rows_selected)){
-          return()
+    
+    
+    output$review <- renderUI({
+        if(is.null(input$tblapplicants_rows_selected)){
+            return()
         }
         
         box(width = 12,
@@ -351,131 +229,159 @@ shinyServer(
                    textAreaInput("comment",
                                  label = "Comments", 
                                  rows = 6
-                  )
+                   )
             )
         )
-      })
-      
-      
-      output$ui_save <- renderUI({
-        actionLink(
-          "save",
-          box(
-            p("Save", style="text-align: center;"),
-            width = NULL,
-            background = switch(input$accept,
-                                `Clearly In` = "green",
-                                Pending = "light-blue",
-                                Reject = "red")
-          )
-        )
-      })
-      
-
     })
     
+    
+    
     observeEvent(input$save, {
-      
-      # Get row for review
-      new_decision <- v$data %>% 
-        filter(`Monash ID` == v$ID) %>% 
-        mutate(`Owner & Date` = paste(format(Sys.time(), tz="GMT"), v$email),
-               `Clearly In (offer)` = 
-                 ifelse(input$accept == "Offer", 1, 0),
-               `Pending (may select on close of applications)`= 
-                 ifelse(input$accept == "Maybe", 1, 0),
-               `No offer (reject)` = 
-                 ifelse(input$accept == "Reject", 1, 0),
-               Query = input$comment)
-      
-      # Add to list of changes
-      v$decisions <- new_decision
-      
-      # upload decision to spreadsheet
-      v$changes <- uploadChanges(changes = v$decisions)
+        
+        # Get row for review
+        new_decision <- v$data %>% 
+            filter(`Monash ID` == v$ID) %>% 
+            mutate(`Owner & Date` = paste(format(Sys.time(), tz="GMT"), v$email),
+                   `Clearly In (offer)` = 
+                       ifelse(input$accept == "Offer", 1, 0),
+                   `Pending (may select on close of applications)`= 
+                       ifelse(input$accept == "Maybe", 1, 0),
+                   `No offer (reject)` = 
+                       ifelse(input$accept == "Reject", 1, 0),
+                   Query = input$comment)
+        
+        # Add to list of changes
+        v$decisions <- new_decision
+        
+        # upload decision to spreadsheet
+        v$changes <- uploadChanges(changes = v$decisions)
         
     })
+    
     
     
     # Upload changes to the google sheet
     uploadChanges <- function(changes){
-      
-      notif_save <- showNotification("Uploading review.")
-      if(NROW(changes) > 0){
-        # find row of data to replace based on ID, allow for headers in A and B
-        replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
         
-        # Remove row without a decision
-        range_delete(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", range = replacing_row)
-        
-        # Remove the id column
-        changes <- changes %>% select(-id)
-        
-        # Add the decision to the data set
-        sheet_append(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI",           data = changes)
-        
-        # Get the new updated data
-        gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
-        
-        ## Download data
-        v$data <- gsapps %>% 
-          # demog submission info on sheet 1
-          read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
-        
-        
-        # Clear changes 
-        v$changes <- list()
-        
-      }
-      removeNotification(notif_save)
-      return(changes)
+        notif_save <- showNotification("Uploading review.")
+        if(NROW(changes) > 0){
+            # find row of data to replace based on ID, allow for headers in A and B
+            replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
+            
+            # Remove row without a decision
+            range_delete(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", range = replacing_row)
+            
+            # Remove the id column
+            changes <- changes %>% select(-id)
+            
+            # Add the decision to the data set
+            sheet_append(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", data = changes)
+            
+            # Get the new updated data
+            gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+            
+            ## Download data
+            v$data <- gsapps %>% 
+                # demog submission info on sheet 1
+                read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
+            
+            
+            # Clear changes 
+            v$changes <- list()
+            
+        }
+        removeNotification(notif_save)
+        return(changes)
     }
     
     
-    output$summaries <- renderUI({
-      
-      input$text_match
-      
-      
-      # analyse text from Statements
-      # Read in all statements
-      current_statements <- v$statements$names
-        browser()
-        # get the list of missing SoPs
-        to_get <- v$data$`Monash ID`[!(v$data$`Monash ID` %in% current_statements)]
+    output$uniquewords <- renderPlot({
         
-        if (length(to_get) > 0){
-          pdfnames <- v$data %>% 
-            filter(`Monash ID` %in% to_get) %>% 
-            mutate(name = 
-                     paste0(Surname, ", ", `Given Name`, " ",
-                            `Monash ID`, " ", "SoP.pdf")) %>% 
-            pull(name)
-          
-          
-        # Use pdf tools to extract text from statement
-        v$statements <- purrr::map(pdfnames, function(a){
-          file.path("SoP", a) %>% pdf_text() %>% paste()})
+        statements_tf_idf <- getUniqueWords(v$statement_names, v$statements) %>% 
+            mutate(ID = parse_number(ID))
         
+        statements_tf_idf <- statements_tf_idf %>%
+            group_by(ID) %>%
+            slice_max(tf_idf, n = 12, with_ties = FALSE) %>%
+            ungroup() 
         
-        v$statement_ids <- to_get
-        # Will have to join to previous list of statements
-        # fairly quick to pull the text if we cannot concatenate
-        }
-      
+        # if (!is.null(input$commonwords_rows_selected)){
+        #   statements_tf_idf %>% select(ID, word) %>% 
+        #     filter(word == input$commonwords_rows_selected$word)
+        #   
+        # }
+        
+        statements_tf_idf %>%
+            ggplot(aes(tf_idf, fct_reorder(word, tf_idf), fill = word)) +
+            geom_col(show.legend = FALSE) +
+            facet_wrap(~ID, ncol = 4, scales = "free") +
+            labs(x = "tf-idf", y = NULL) +
+            scale_fill_viridis_d(option = "inferno")
+        
     })
     
-
-    observeEvent(input$btn_debug, {
-      browser()
+    output$lda <- renderPlot({
+        
+        # Change topics to allow more or less groups
+        top_terms <- tibble(ID = v$statement_names, statement = unlist(v$statements)) %>%
+            LDAwords(., topics = 5)
+        
+        top_terms %>%
+            mutate(term = reorder_within(term, beta, topic)) %>%
+            slice_max(beta, n = 15) %>% 
+            ungroup() %>% 
+            ggplot(aes(beta, term)) +
+            geom_col(show.legend = FALSE) +
+            facet_wrap(~ topic, scales = "free") +
+            scale_y_reordered() +
+            scale_fill_viridis_d(option = "inferno")
+        
+    })
+    
+    output$commonwords <- DT::renderDT({
+        
+        notif_statements <- showNotification("Updating Statements")
+            
+        # statements as a data set
+        commonwords <- tibble(ID = v$statement_names, statement = unlist(v$statements)) %>%
+            unnest_tokens(word, statement) %>%
+            anti_join(stop_words) %>%
+            count(word, sort = TRUE) %>%
+            mutate(word = reorder(word, n)) %>% 
+            slice_max(n, n = 15) %>% 
+            datatable(rownames = FALSE, 
+                      selection = list(mode = "single"),
+                      style = "bootstrap", 
+                      class = "hover",
+                      options = list(sDom  = '<"top">irt<"bottom">p',
+                                     scrollX = TRUE), extensions = 'Responsive')
+        
+        removeNotification(notif_statements)
+        
+        commonwords 
     })
     
     
-    onStop(function(){
-      cache <- isolate(reactiveValuesToList(v))
-      save(cache, file = "cache_abstracts.Rdata")
+    
+    observeEvent(input$commonwords_rows_selected,{
+        # Update
+        
+        message("Output selected applicant")
+        
+        v$ID <- tbl_filtered_data() %>% 
+            filter(row_number() == input$tblapplicants_rows_selected) %>%
+            pull(`Monash ID`)
     })
     
-    removeNotification(notif_ui)
-  }
-)
+    selectedRows <- reactive({
+        unique(
+            c(input[["commonwords_rows_selected"]])
+        )
+    })
+    
+    output[["selectedRows"]] <- renderText({
+        selectedRows()
+    })
+    
+    
+})
