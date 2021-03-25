@@ -12,6 +12,7 @@ library(topicmodels)
 shinyServer(function(input, output, session) {
 
     source("helpers.R")
+    sheetid <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI"
     
     drive_auth(email = "stephanie.kobakian@monash.edu")
     #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
@@ -34,15 +35,15 @@ shinyServer(function(input, output, session) {
     isolate({
         
         cat(file=stderr(), "Get sheet\n")
-        notif_data <- showNotification("Constructing dataset")
+        notif_data <- showNotification("Constructing dataset", duration = NULL)
         # Applications google sheet
-        gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        gsapps <- gs4_get(sheetid)
         
         ## Download data
         cat(file=stderr(), "Get data from sheet\n")
         v$data <- gsapps %>% 
             # demog submission info on sheet 1
-            read_sheet(sheet = 1) %>% tail(-1) %>% 
+            read_sheet(sheet = 2) %>% tail(-1) %>% 
             mutate(id = seq_len(NROW(.)))
         
         v$email <- gs4_user()
@@ -55,19 +56,23 @@ shinyServer(function(input, output, session) {
         # Read in all statements
         cat(file=stderr(), "Get text from statements\n")
         
-        # names of all statements
+        # create names of all statements
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", `Given Name`, " ",
                               `Monash ID`, " ", "SoP.pdf")) %>% 
             pull(name)
         
+        files_to_get <- drive_find(pattern = "SoP.pdf", type = "pdf")
+        
         # names of current statements
         current_statements <- list.files("SoP/")
-                
+        
         # get the list of missing SoPs
-        to_get <- pdfnames[!(pdfnames %in% current_statements)]
+        to_get <- files_to_get$name[!(files_to_get$name %in% current_statements)]
         #    filter(`Monash ID` %in% to_get) %>% 
+        
+        cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
         
         # Download statements
         dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
@@ -81,8 +86,7 @@ shinyServer(function(input, output, session) {
             file.path("SoP", a) %>% pdf_text() %>% str_trim() %>% toString()})
         
         # make sure amount of statements match data for student submissions
-        v$statement_names <- list.files("SoP/")
-        
+        v$statement_names <- pdfnames
         
         removeNotification(dl_sop)
         
@@ -128,8 +132,8 @@ shinyServer(function(input, output, session) {
         cat(file=stderr(), "Construct Datatable\n")
         notif_table <- showNotification("Constructing datatable")
         
-        tbl_filtered_data() %>% 
-            select(`M/F`,  WAM = `WAM/GPA`, 
+        out <- tbl_filtered_data() %>% 
+            select(`Monash ID`, `M/F`,  WAM = `WAM/GPA`, 
                    Location = `Domestic/   International`,
                    Credit = `Applicant applied for credit? Y/N`,
                    Qualification,
@@ -150,13 +154,24 @@ shinyServer(function(input, output, session) {
                       options = list(sDom  = '<"top">irt<"bottom">p',
                                      scrollX = TRUE))
         
+        
+        # colour the rows by decision
+        if (any(input$decided == "Y")) {
+            out <- out %>%
+                # if decision is no
+                formatStyle("decision",
+                            target = 'row',
+                            backgroundColor = styleEqual(c("No", "Maybe", "Yes", "Unknown"), 
+                                                         c("red", "orange", "green", "grey"))) 
+        }
+        
+        removeNotification(notif_table)
+        
+        out
+        
+        
     })
 
-    # UI for commonly used words
-    #output$commonwords <- 
-    
-    
-    
     
     
     # UI for abstract
@@ -165,8 +180,7 @@ shinyServer(function(input, output, session) {
             return(
                 box(title = "Select an applicant from the sidebar to review their application",
                     width = 12)
-            )
-        }
+            )}
         
     })
     
@@ -195,6 +209,8 @@ shinyServer(function(input, output, session) {
             # Get statement of purpose
             pdfname <- applicant_data %>% 
                 mutate(name = paste0(Surname, ", ", `Given Name`, " ", v$ID, " ", "SoP.pdf")) %>% pull(name)
+            
+            SoPtext <- pdf_text(file.path("SoP", pdfname)) %>% paste()
             
             # Show the Statement of Purpose
             box(
@@ -269,21 +285,21 @@ shinyServer(function(input, output, session) {
             replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
             
             # Remove row without a decision
-            range_delete(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", range = replacing_row)
+            range_delete(ss = sheetid, range = replacing_row)
             
             # Remove the id column
             changes <- changes %>% select(-id)
             
             # Add the decision to the data set
-            sheet_append(ss = "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI", data = changes)
+            sheet_append(ss = sheetid, data = changes)
             
             # Get the new updated data
-            gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+            gsapps <- gs4_get(sheetid)
             
             ## Download data
             v$data <- gsapps %>% 
                 # demog submission info on sheet 1
-                read_sheet(sheet = 1) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
+                read_sheet(sheet = 2) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
             
             
             # Clear changes 
@@ -342,13 +358,22 @@ shinyServer(function(input, output, session) {
         
         notif_statements <- showNotification("Updating Statements")
             
+        # Attempt to remove names from statements for privacy
+        name_words <- tibble(word = c(v$data$`Given Name`, v$data$Surname))
+            
         # statements as a data set
         commonwords <- tibble(ID = v$statement_names, statement = unlist(v$statements)) %>%
             unnest_tokens(word, statement) %>%
             anti_join(stop_words) %>%
-            count(word, sort = TRUE) %>%
-            mutate(word = reorder(word, n)) %>% 
-            slice_max(n, n = 15) %>% 
+            anti_join(name_words) %>%
+            group_by(ID, word) %>% 
+            count(sort = TRUE) %>%
+            ungroup() %>% 
+            group_by(word) %>% 
+            summarise(Statements = n(), Mentions = sum(n)) %>% 
+            ungroup() %>% 
+            mutate(word = reorder(word, Mentions)) %>% 
+            slice_max(Mentions, n = 15) %>% 
             datatable(rownames = FALSE, 
                       selection = list(mode = "single"),
                       style = "bootstrap", 

@@ -31,7 +31,7 @@ filedownload <- function(name){
   out <- tryCatch(
     {drive_download(name, path = file.path("SoP", name))},
     error = function(cond) {
-      message(paste("Error: file name does not identify at least one Drive file."))
+      message(paste("Error: ", name, " does not identify at least one Drive file."))
       return(NA)
     })
 }

@@ -27,6 +27,7 @@ shinyUI(
                 sliderInput("slider_wam", "WAM",
                             min = 50, max = 100, value = c(50, 100), step=5),
                 
+                checkboxGroupInput("decided", "Decision\nmade", choices = c("Y", "N"), selected = "N"),
                 checkboxGroupInput("stats_background", "Statistics\nBackground", choices = c("Y", "N"), selected = c("Y", "N")),
                 
                 menuItem("Application Summaries", tabName = "summaries", icon = icon("dashboard")),
