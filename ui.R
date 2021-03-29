@@ -23,12 +23,14 @@ shinyUI(
                 id = "tabs",
                 
                 
+                checkboxGroupInput("decided", "Decision\nmade", choices = c("Y", "N"), selected = "N"),
                 textInput("text_match", "Fuzzy text sorting"),
                 sliderInput("slider_wam", "WAM",
                             min = 50, max = 100, value = c(50, 100), step=5),
                 
-                checkboxGroupInput("decided", "Decision\nmade", choices = c("Y", "N"), selected = "N"),
                 checkboxGroupInput("stats_background", "Statistics\nBackground", choices = c("Y", "N"), selected = c("Y", "N")),
+                radioButtons("stemwords", "Use word stems", choices = c("Y", "N"), selected = "N"),
+                
                 
                 menuItem("Application Summaries", tabName = "summaries", icon = icon("dashboard")),
                 
@@ -45,19 +47,24 @@ shinyUI(
                         # data table of commonly used words
                         DT::DTOutput("tblapplicants"),
                         
-                        h1("Commonly used words in applications"),
-                        # data table of commonly used words
-                        DT::DTOutput("commonwords"),
+                        tabBox( title = "Statements", id = "tabset1",
+                                width = 12,
+                                tabPanel("Common Words",
+                                h1("Commonly used words in applications"),
+                                # data table of commonly used words
+                                DT::DTOutput("commonwords")),
+                                
+                                tabPanel("Unique Words",
+                                h1("Unique words used in statements"),
+                                # data table of unique words found
+                                plotOutput("uniquewords")),
                         
-                        h1("Topics mentioned"),
-                        # filter according to search term
-                        plotOutput("lda"),
-                        
-                        h1("Unique words used in statements"),
-                        # data table of unique words found
-                        plotOutput("uniquewords")
-                        
-                ),
+                                tabPanel("Common Topics",
+                                h1("Common Topics"),
+                                # filter according to search term
+                                plotOutput("lda"))
+                                )
+                        ),
                 
                 
                 tabItem(tabName = "abstract",

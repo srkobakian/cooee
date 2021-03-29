@@ -4,6 +4,7 @@ library(googledrive)
 library(googlesheets4)
 library(DT)
 library(pdftools)
+library(SnowballC)
 library(tidyverse)
 library(tidytext)
 library(topicmodels)
@@ -69,9 +70,10 @@ shinyServer(function(input, output, session) {
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", `Given Name`, " ",
-                              `Monash ID`, " - ", "SoP.pdf")) %>% 
+                              `Monash ID`, " - SoP.pdf")) %>% 
             pull(name)
         
+        # May have issues if PDF capitalised not pdf lowercase
         files_to_get <- drive_find(pattern = "SoP.pdf", type = "pdf")
         
         # names of current statements
@@ -81,7 +83,9 @@ shinyServer(function(input, output, session) {
         to_get <- files_to_get$name[!(files_to_get$name %in% current_statements)]
         #    filter(`Monash ID` %in% to_get) %>% 
         
+        if (!is_empty(to_get)) {
         cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
+        }
         
         # Download statements
         dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
@@ -372,17 +376,37 @@ shinyServer(function(input, output, session) {
             
         # statements as a data set
         commonwords <- tibble(ID = v$statement_names, statement = unlist(v$statements)) %>%
-            unnest_tokens(word, statement) %>%
-            anti_join(stop_words) %>%
-            anti_join(name_words) %>%
-            group_by(ID, word) %>% 
-            count(sort = TRUE) %>%
-            ungroup() %>% 
-            group_by(word) %>% 
-            summarise(Statements = n(), Mentions = sum(n)) %>% 
-            ungroup() %>% 
-            mutate(word = reorder(word, Mentions)) %>% 
-            slice_max(Mentions, n = 15) %>% 
+            unnest_tokens(word, statement)
+        
+        if (input$stemwords == "Y") {
+            out <- commonwords %>%
+                # for stem words:
+                anti_join(stop_words) %>%
+                anti_join(name_words) %>%
+                mutate(stem = wordStem(word)) %>%
+                group_by(ID, stem) %>% 
+                count(sort = TRUE) %>%
+                ungroup() %>% 
+                group_by(stem) %>% 
+                summarise(Statements = n(), Mentions = sum(n)) %>% 
+                ungroup() %>% 
+                mutate(stem = reorder(stem, Mentions)) %>% 
+                slice_max(Mentions, n = 15) 
+        } else {
+           out <- commonwords %>%
+                anti_join(stop_words) %>%
+                anti_join(name_words) %>%
+                group_by(ID, word) %>% 
+                count(sort = TRUE) %>%
+                ungroup() %>% 
+                group_by(word) %>% 
+                summarise(Statements = n(), Mentions = sum(n)) %>% 
+                ungroup() %>% 
+                mutate(word = reorder(word, Mentions)) %>% 
+                slice_max(Mentions, n = 15) 
+        }
+        
+        out %>% 
             datatable(rownames = FALSE, 
                       selection = list(mode = "single"),
                       style = "bootstrap", 
@@ -392,7 +416,7 @@ shinyServer(function(input, output, session) {
         
         removeNotification(notif_statements)
         
-        commonwords 
+        out 
     })
     
     
