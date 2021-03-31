@@ -10,7 +10,8 @@ library(tidytext)
 library(topicmodels)
 
 #email_address <- "dicook@monash.edu"
-email_address <- "stephanie.kobakian@monash.edu"
+#email_address <- "stephanie.kobakian@monash.edu"
+email_address <- "Huize.Zhang@monash.edu"
 #gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
 gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
 # sheet_num <- 2 # Worksheet used for application summary
@@ -70,7 +71,7 @@ shinyServer(function(input, output, session) {
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", `Given Name`, " ",
-                              `Monash ID`, " - SoP.pdf")) %>% 
+                              `Monash ID`, " SoP.pdf")) %>% 
             pull(name)
         
         # May have issues if PDF capitalised not pdf lowercase
