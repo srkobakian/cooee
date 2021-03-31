@@ -19,7 +19,7 @@ sheet_num <- 2 # Worksheet
 
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
-
+    
     source("helpers.R")
     
     #drive_auth(email = "stephanie.kobakian@monash.edu")
@@ -68,6 +68,7 @@ shinyServer(function(input, output, session) {
         cat(file=stderr(), "Get text from statements\n")
         
         # create names of all statements
+        
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", `Given Name`, " ",
@@ -85,16 +86,16 @@ shinyServer(function(input, output, session) {
         #    filter(`Monash ID` %in% to_get) %>% 
         
         if (!is_empty(to_get)) {
-        cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
+            cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
         }
         
         # Download statements
         dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
-    
+        
         if (length(to_get)>0){    
-        downloads <- lapply(to_get, FUN = filedownload)
+            downloads <- lapply(to_get, FUN = filedownload)
         }
-    
+
         # Use pdf tools to extract text from statement
         v$statements <- statements <- purrr::map(pdfnames, function(a){
             file.path("SoP", a) %>% pdf_text() %>% str_trim() %>% toString()})
@@ -185,7 +186,7 @@ shinyServer(function(input, output, session) {
         
         
     })
-
+    
     
     
     # UI for abstract
@@ -297,15 +298,15 @@ shinyServer(function(input, output, session) {
         if(NROW(changes) > 0){
             # find row of data to replace based on ID, allow for headers in A and B
             replacing_row <- as.character(which(v$data$`Monash ID` == v$ID) + 2)
-            
+            browser()
             # Remove row without a decision
-            range_delete(ss = gsheet, range = replacing_row)
+            range_delete(ss = gsheet, range = replacing_row, sheet = sheet_num)
             
             # Remove the id column
             changes <- changes %>% select(-id)
             
             # Add the decision to the data set
-            sheet_append(ss = gsheet, data = changes)
+            sheet_append(ss = gsheet, data = changes, sheet = sheet_num)
             
             # Get the new updated data
             gsapps <- gs4_get(gsheet)
@@ -313,7 +314,7 @@ shinyServer(function(input, output, session) {
             ## Download data
             v$data <- gsapps %>% 
                 # demog submission info on sheet 1
-                read_sheet(sheet = sheet_num) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
+                read_sheet(sheet = 2) %>% tail(-1) %>% mutate(id = seq_len(NROW(.)))
             
             
             # Clear changes 
@@ -371,10 +372,10 @@ shinyServer(function(input, output, session) {
     output$commonwords <- DT::renderDT({
         
         notif_statements <- showNotification("Updating Statements")
-            
+        
         # Attempt to remove names from statements for privacy
         name_words <- tibble(word = c(v$data$`Given Name`, v$data$Surname))
-            
+        
         # statements as a data set
         commonwords <- tibble(ID = v$statement_names, statement = unlist(v$statements)) %>%
             unnest_tokens(word, statement)
@@ -394,7 +395,7 @@ shinyServer(function(input, output, session) {
                 mutate(stem = reorder(stem, Mentions)) %>% 
                 slice_max(Mentions, n = 15) 
         } else {
-           out <- commonwords %>%
+            out <- commonwords %>%
                 anti_join(stop_words) %>%
                 anti_join(name_words) %>%
                 group_by(ID, word) %>% 
@@ -438,9 +439,39 @@ shinyServer(function(input, output, session) {
         )
     })
     
-    output[["selectedRows"]] <- renderText({
-        selectedRows()
+    # output[["selectedRows"]] <- renderText({
+    #     selectedRows()
+    # })
+    
+    output$ui_save <- renderUI({
+        actionLink(
+            "save",
+            box(
+                p("Save", style="text-align: center;"),
+                width = NULL,
+                background = switch(input$accept,
+                                    `Clearly In` = "green",
+                                    Pending = "light-blue",
+                                    Reject = "red")
+            )
+        )
     })
-    
-    
+    observeEvent(input$save, {
+        # Get row for review
+        new_decision <- v$data %>%
+            filter(`Monash ID` == v$ID) %>%
+            mutate(`Owner & Date` = paste(format(Sys.time(), tz="GMT"), v$email),
+                   `Clearly In (offer)` =
+                       ifelse(input$accept == "Offer", 1, 0),
+                   `Pending (may select on close of applications)`=
+                       ifelse(input$accept == "Maybe", 1, 0),
+                   `No offer (reject)` =
+                       ifelse(input$accept == "Reject", 1, 0),
+                   Query = input$comment)
+        # Add to list of changes
+        v$decisions <- new_decision
+        # upload decision to spreadsheet
+        v$changes <- uploadChanges(changes = v$decisions)
+    })    
 })
+
