@@ -76,30 +76,36 @@ shinyServer(function(input, output, session) {
             pull(name)
         
         # May have issues if PDF capitalised not pdf lowercase
-        files_to_get <- drive_find(pattern = "SoP.pdf", 
-                                   type = "pdf", 
-                                   team_drive = as_id("https://drive.google.com/drive/u/0/folders/0AI7QrCP_MPU_Uk9PVA"))
+#        files_to_get <- drive_find(pattern = "SoP.pdf", 
+#                                   type = "pdf", 
+#                                   team_drive = as_id("https://drive.google.com/drive/u/0/folders/0AI7QrCP_MPU_Uk9PVA"))
         
         # names of current statements
         current_statements <- list.files("SoP/")
-        
+
+# Di says: commenting out file download parts for now. Only
+# read in the current pdf's for this app.
+# The read of spreadsheet, though, should make a note of
+# missing files, though.        
         # get the list of missing SoPs
-        to_get <- files_to_get[!(files_to_get$name %in% current_statements),]
+#        to_get <- files_to_get[!(files_to_get$name %in% current_statements),]
         #    filter(`Monash ID` %in% to_get) %>% 
         
-        if (!is_empty(to_get)) {
-            cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
-        }
+#        if (!is_empty(to_get)) {
+#            cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
+#        }
         
         # Download statements
-        dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
+#        dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
         
-        for (i in 1:nrow(to_get)) {    
-            filedownload(to_get[i,])
+#        for (i in 1:nrow(to_get)) {    
+#            filedownload(to_get[i,])
             #downloads <- lapply(to_get, FUN = filedownload)
-        }
+#        }
 
         # Use pdf tools to extract text from statement
+        # CURRENTLY THROWING ERROR HERE
+        # Not finding the pdf file
         v$statements <- statements <- purrr::map(pdfnames, function(a){
             file.path("SoP", a) %>% pdf_text() %>% str_trim() %>% toString()})
         
