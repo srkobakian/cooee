@@ -75,13 +75,6 @@ shinyServer(function(input, output, session) {
                               `Monash ID`, " - SoP.pdf")) %>% 
             pull(name)
         
-        pdffolder <- v$data %>% 
-            mutate(name = 
-                       paste0(Surname, ", ", str_to_title(`Given Name`), " - ",
-                              `Monash ID`)) %>% 
-            pull(name)
-        
-        
         # May have issues if PDF capitalised not pdf lowercase
         files_to_get <- drive_find(pattern = "SoP.pdf", 
                                    type = "pdf", 
@@ -91,7 +84,7 @@ shinyServer(function(input, output, session) {
         current_statements <- list.files("SoP/")
         
         # get the list of missing SoPs
-        to_get <- files_to_get$name[!(files_to_get$name %in% current_statements)]
+        to_get <- files_to_get[!(files_to_get$name %in% current_statements),]
         #    filter(`Monash ID` %in% to_get) %>% 
         
         if (!is_empty(to_get)) {
@@ -101,8 +94,9 @@ shinyServer(function(input, output, session) {
         # Download statements
         dl_sop <- showNotification("Downloading Statements of Purpose, this may take a while.", duration = NULL)
         
-        if (length(to_get)>0){    
-            downloads <- lapply(to_get, FUN = filedownload)
+        for (i in 1:nrow(to_get)) {    
+            filedownload(to_get[i,])
+            #downloads <- lapply(to_get, FUN = filedownload)
         }
 
         # Use pdf tools to extract text from statement
