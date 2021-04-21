@@ -29,7 +29,7 @@ fuzzyMatching <- function(pattern, dataset){
 filedownload <- function(name){
   cat(file=stderr(), name, "\n")
   out <- tryCatch(
-    {drive_download(name, path = file.path("SoP", name))},
+    {drive_download(name)},
     error = function(cond) {
       message(paste("Error: ", name, " does not identify at least one Drive file."))
       return(NA)

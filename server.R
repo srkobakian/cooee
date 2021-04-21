@@ -9,11 +9,11 @@ library(tidyverse)
 library(tidytext)
 library(topicmodels)
 
-#email_address <- "dicook@monash.edu"
+email_address <- "dicook@monash.edu"
 #email_address <- "stephanie.kobakian@monash.edu"
-email_address <- "Huize.Zhang@monash.edu"
-#gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
-gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
+#email_address <- "Huize.Zhang@monash.edu"
+gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
+# gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
 # sheet_num <- 2 # Worksheet used for application summary
 sheet_num <- 2 # Worksheet
 
@@ -71,12 +71,21 @@ shinyServer(function(input, output, session) {
         
         pdfnames <- v$data %>% 
             mutate(name = 
-                       paste0(Surname, ", ", `Given Name`, " ",
-                              `Monash ID`, " SoP.pdf")) %>% 
+                       paste0(Surname, ", ", str_to_title(`Given Name`), " ",
+                              `Monash ID`, " - SoP.pdf")) %>% 
             pull(name)
         
+        pdffolder <- v$data %>% 
+            mutate(name = 
+                       paste0(Surname, ", ", str_to_title(`Given Name`), " - ",
+                              `Monash ID`)) %>% 
+            pull(name)
+        
+        
         # May have issues if PDF capitalised not pdf lowercase
-        files_to_get <- drive_find(pattern = "SoP.pdf", type = "pdf")
+        files_to_get <- drive_find(pattern = "SoP.pdf", 
+                                   type = "pdf", 
+                                   team_drive = as_id("https://drive.google.com/drive/u/0/folders/0AI7QrCP_MPU_Uk9PVA"))
         
         # names of current statements
         current_statements <- list.files("SoP/")
