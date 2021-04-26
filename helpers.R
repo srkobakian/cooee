@@ -79,3 +79,23 @@ getUniqueWords <- function(statement_names = v$statement_names, statements = v$s
   
   out
 }
+
+download_files <- function(){
+  
+  drive_auth()
+  
+  on_drive <- drive_ls(path = "MBAT Testing", recursive = TRUE, pattern = "SoP.pdf")
+  
+  current <- list.files("SoP/")
+  
+  to_get <- on_drive[!(on_drive$name %in% current),]
+  
+  if (!is_empty(to_get)){
+    cat(file=stderr(), "Files to get: \n", paste(to_get$name, collapse = "\n"), "\n")
+  }
+  
+  for (i in 1:nrow(to_get)){
+    filedownload(to_get[i,])
+  }
+  
+}
