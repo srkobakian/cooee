@@ -20,6 +20,7 @@ sheet_num <- 2 # Worksheet
 # Define server logic required to draw a histogram
 shinyServer(function(input, output, session) {
     
+    cat("Have you downloaded the pdf files using download_files?\n")
     source("helpers.R")
     
     #drive_auth(email = "stephanie.kobakian@monash.edu")
@@ -78,16 +79,28 @@ shinyServer(function(input, output, session) {
         # names of current statements
         current_statements <- list.files("SoP/")
 
+        # Check that we have the right pdfs
+        keep <- pdfnames %in% current_statements
+        cat("These applicants have no statements: \n")
+        for (i in pdfnames[!keep])
+          cat(i, "\n")
+        pdfnames <- pdfnames[keep]
+        
         # Use pdf tools to extract text from statement
         # CURRENTLY THROWING ERROR HERE
         # Not finding the pdf file
+        
         v$statements <- statements <- purrr::map(pdfnames, function(a){
-            file.path("SoP", a) %>% pdf_text() %>% str_trim() %>% toString()})
+                cat(a, "\n") 
+                file.path("SoP", a) %>% 
+                pdf_text() %>% 
+                str_trim() %>% 
+                toString()})
         
         # make sure amount of statements match data for student submissions
         v$statement_names <- pdfnames
         
-        removeNotification(dl_sop)
+        #removeNotification(dl_sop)
         
         removeNotification(notif_data)
     })

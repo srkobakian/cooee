@@ -23,22 +23,6 @@ fuzzyMatching <- function(pattern, dataset){
     map_dbl(~ sum(agrepl(gsub(" ", "|", pattern), .))/length(.))
 }
 
-# download a single file, allow a reasonable return value
-# allow downloads to continue and report errors if found
-
-filedownload <- function(name){
-  cat(file=stderr(), name$name, "\n")
-  out <- tryCatch(
-    {drive_download(name, 
-        path = paste0("./SoP/", name$name), 
-        overwrite = TRUE)},
-    error = function(cond) {
-      message(paste("Error: ", name, " does not identify at least one Drive file."))
-      return(NA)
-    })
-}
-
-
 
 LDAwords <- function(data, topics = 5, matrix = "beta"){
   
@@ -80,22 +64,3 @@ getUniqueWords <- function(statement_names = v$statement_names, statements = v$s
   out
 }
 
-download_files <- function(){
-  
-  drive_auth()
-  
-  on_drive <- drive_ls(path = "MBAT Testing", recursive = TRUE, pattern = "SoP.pdf")
-  
-  current <- list.files("SoP/")
-  
-  to_get <- on_drive[!(on_drive$name %in% current),]
-  
-  if (!is_empty(to_get)){
-    cat(file=stderr(), "Files to get: \n", paste(to_get$name, collapse = "\n"), "\n")
-  }
-  
-  for (i in 1:nrow(to_get)){
-    filedownload(to_get[i,])
-  }
-  
-}
