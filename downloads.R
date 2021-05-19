@@ -1,3 +1,47 @@
+# Prep code, as used in app
+library(shiny)
+library(shinydashboard)
+library(googledrive)
+library(googlesheets4)
+library(DT)
+library(pdftools)
+library(SnowballC)
+library(tidyverse)
+library(tidytext)
+library(topicmodels)
+
+email_address <- "dicook@monash.edu"
+#email_address <- "stephanie.kobakian@monash.edu"
+#email_address <- "Huize.Zhang@monash.edu"
+gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
+# gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
+# sheet_num <- 2 # Worksheet used for application summary
+sheet_num <- 2 # Worksheet
+drive_auth(email = email_address)
+#gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
+gs4_auth(email = email_address, token = drive_token())
+
+gsapps <- gs4_get(gsheet)
+data <- gsapps %>% 
+  # demog submission info on sheet 2
+  read_sheet(sheet = sheet_num) %>% tail(-1) %>% 
+  mutate(id = seq_len(NROW(.)))
+
+pdfnames <- data %>% 
+  mutate(name = 
+           paste0(Surname, ", ", str_to_title(`Given Name`), " ",
+                  `Monash ID`, " - SoP.pdf")) %>% 
+  pull(name)
+
+current_statements <- list.files("SoP/")
+keep <- pdfnames %in% current_statements
+cat("These applicants have no statements: \n")
+for (i in pdfnames[!keep])
+  cat(i, "\n")
+pdfnames <- pdfnames[keep]
+
+download_files()
+
 # download a single file, allow a reasonable return value
 # allow downloads to continue and report errors if found
 
