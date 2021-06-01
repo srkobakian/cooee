@@ -8,6 +8,7 @@ library(SnowballC)
 library(tidyverse)
 library(tidytext)
 library(topicmodels)
+library(progress)
 
 email_address <- "dicook@monash.edu"
 #email_address <- "stephanie.kobakian@monash.edu"
