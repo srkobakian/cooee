@@ -1,3 +1,5 @@
+# This is old code, and has been replaced with download.R
+
 # Prep code, as used in app
 library(shiny)
 library(shinydashboard)
@@ -9,6 +11,7 @@ library(SnowballC)
 library(tidyverse)
 library(tidytext)
 library(topicmodels)
+library(progress)
 
 email_address <- "dicook@monash.edu"
 #email_address <- "stephanie.kobakian@monash.edu"
@@ -64,7 +67,7 @@ download_files <- function(folder = "1nPEfJm0JB4bz5INZqzjwSHEUMPIi4ZYX"){
   
   drive_auth()
   
-  on_drive <- drive_ls(path = folder, recursive = TRUE, pattern = "SoP.pdf", team_drive = "Master of Business Analytics B6022")
+  on_drive <- drive_ls(path = folder, recursive = TRUE, pattern = "SoP.pdf", team_drive = "B6022 - Master of Business Analytics")
   
   current <- list.files("SoP/")
   

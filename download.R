@@ -1,10 +1,20 @@
-download_files <- function(){
+library(googledrive)
+library(googlesheets4)
+library(pdftools)
+library(tidyverse)
+library(progress)
+
+myteamdr <- "B6022 - Master of Business Analytics"
+folder <- "S1-2022 APPLICATION DOCUMENTS"
+download_files(folder, myteamdr)
+
+download_files <- function(pttn = "2022", teamdr = "MBAT Testing - share"){
 
   drive_auth()
   
-  this_year <- drive_ls(pattern = "2022", team_drive = "MBAT Testing - share")
+  this_year <- drive_ls(pattern = pttn, team_drive = teamdr)
   
-  all_individual <- drive_ls(path = as_dribble(this_year), team_drive = "MBAT Testing - share")
+  all_individual <- drive_ls(path = as_dribble(this_year), team_drive = teamdr)
   
   pb <- progress_bar$new(total = nrow(all_individual),
                          format = "Folders to scan [:bar] :current / :total")
@@ -13,7 +23,7 @@ download_files <- function(){
     mutate(rn = dplyr::row_number()) %>% 
     nest(-rn) %>% 
     mutate(sop = purrr::map(data, ~{pb$tick(); drive_ls(path = as_dribble(.x), 
-                                            team_drive = "MBAT Testing - share", 
+                                            team_drive = teamdr, 
                                             pattern = "SoP.pdf")})) %>% 
     unnest(sop) %>% 
     pull(name)
