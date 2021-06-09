@@ -25,18 +25,18 @@ download_files <- function(pttn = "2022", teamdr = "MBAT Testing - share"){
     mutate(sop = purrr::map(data, ~{pb$tick(); drive_ls(path = as_dribble(.x), 
                                             team_drive = teamdr, 
                                             pattern = "SoP.pdf")})) %>% 
-    unnest(sop) %>% 
-    pull(name)
+    unnest(sop)
   
   
   current <- list.files("SoP/")
   
-  to_get <- setdiff(on_drive, current)
+  to_get <- setdiff(on_drive$name, current)
   
-  if (!is_empty(to_get)){
-    cat(file=stderr(), "Files to get: \n", paste(to_get, collapse = "\n"), "\n")
-    for (i in 1:length(to_get)){
-      filedownload(to_get[i])
+  to_get_df <- on_drive %>% filter(name %in% to_get)
+  
+  if (!is_empty(to_get_df)){
+    for (i in 1:nrow(to_get_df)){
+      filedownload(to_get_df$id[i], to_get_df$name[i])
     }
     
   }
@@ -46,10 +46,10 @@ download_files <- function(pttn = "2022", teamdr = "MBAT Testing - share"){
 # download a single file, allow a reasonable return value
 # allow downloads to continue and report errors if found
 
-filedownload <- function(name){
-  cat(file=stderr(), name, "\n")
+filedownload <- function(id, name){
+  #cat(file=stderr(), name, "\n")
   out <- tryCatch(
-    {drive_download(name, 
+    {drive_download(as_id(id), 
                     path = paste0("./SoP/", name), 
                     overwrite = TRUE)},
     error = function(cond) {
