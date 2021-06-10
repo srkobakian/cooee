@@ -170,7 +170,7 @@ SoP_cors %>%
   graph_from_data_frame() %>%
   ggraph(layout = "fr") +
   geom_edge_link(aes(alpha = correlation, width = correlation)) +
-  geom_node_point(aes(label = name), size = 6, color = "lightblue") +
+  geom_node_point(aes(label = SoP_cors_labels$label), size = 6, color = "lightblue") +
   geom_node_text(aes(label = SoP_cors_labels$label), repel = TRUE) +
   theme_void()
 
