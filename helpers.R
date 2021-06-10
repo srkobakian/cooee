@@ -1,7 +1,3 @@
-has_internet <- function(){
-  !is.null(curl::nslookup("r-project.org", error = FALSE))
-}
-
 # function to split lines read into character strings
 # to replicate line and paragraph spacing of document
 formText <- function(...){
@@ -23,6 +19,27 @@ fuzzyMatching <- function(pattern, dataset){
     map_dbl(~ sum(agrepl(gsub(" ", "|", pattern), .))/length(.))
 }
 
+count_words_SoP <- function(data){
+  
+  out <- data %>% 
+    unnest_tokens(word, statement) %>%
+    anti_join(stop_words) %>%
+    count(ID, word, sort = TRUE) %>%
+    filter(!is.na(iconv(word, "latin2", "ASCII"))) %>% #only English
+    filter(!str_detect(word, "^[0-9]")) %>%
+    mutate(l = str_length(word)) %>%
+    filter(l > 2) %>%
+    select(-l)
+   
+  out
+}
+
+tf_idf_words <- function(id_words) {
+  book_tf_idf <- id_words %>%
+    bind_tf_idf(word, ID, n)
+  
+  book_tf_idf
+}
 
 LDAwords <- function(data, topics = 5, matrix = "beta"){
   
@@ -30,10 +47,12 @@ LDAwords <- function(data, topics = 5, matrix = "beta"){
     unnest_tokens(word, statement) %>%
     anti_join(stop_words) %>%
     count(ID, word, sort = TRUE) %>%
+    filter(!is.na(iconv(word, "latin2", "ASCII"))) %>% #only English
     ungroup() %>%
     cast_dtm(ID, word, n) %>% 
     LDA(., k = topics, control = list(seed = 1234)) %>% 
     tidy(., matrix = matrix)
+  
   out
 }
 

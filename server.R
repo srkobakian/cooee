@@ -7,15 +7,14 @@ library(pdftools)
 library(SnowballC)
 library(tidyverse)
 library(tidytext)
+library(textcat)
 library(topicmodels)
 library(progress)
 
 email_address <- "dicook@monash.edu"
-#email_address <- "stephanie.kobakian@monash.edu"
 #email_address <- "Huize.Zhang@monash.edu"
 gsheet <- "1LLEX7uxrjmrpCJh_5eTS4Ugham8OgbSndj-vBUlwY4U"
 # gsheet <- "1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI" # for testing
-# sheet_num <- 2 # Worksheet used for application summary
 sheet_num <- 2 # Worksheet
 
 # Define server logic required to draw a histogram
@@ -24,11 +23,8 @@ shinyServer(function(input, output, session) {
     cat("Have you downloaded the pdf files using download_files?\n")
     source("helpers.R")
     
-    #drive_auth(email = "stephanie.kobakian@monash.edu")
-    #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
-    #gs4_auth(email = "stephanie.kobakian@monash.edu", token = drive_token())
+    # Accessing the google sheet
     drive_auth(email = email_address)
-    #gargle::gargle_oauth_email("stephanie.kobakian@monash.edu"))
     gs4_auth(email = email_address, token = drive_token())
     
     v <- reactiveValues(
@@ -43,13 +39,10 @@ shinyServer(function(input, output, session) {
         firstRun = TRUE
     )
     
-    #Access the google sheet
+    # Access the google sheet
     isolate({
-        
         cat(file=stderr(), "Get sheet\n")
-        notif_data <- showNotification("Constructing dataset", duration = NULL)
-        # Applications google sheet
-        #gsapps <- gs4_get("1xm-yqbHY07ELYNWiirA6y4VKaufJdGQdKvL3STq3vcI")
+        notif_data <- showNotification("Constructing applicant dataset", duration = NULL)
         gsapps <- gs4_get(gsheet)
         
         ## Download data
@@ -63,14 +56,10 @@ shinyServer(function(input, output, session) {
         v$firstRun <- FALSE
         v$lastSync <- Sys.time()
         
-        # Pull Statements
-        
-        # analyse text from Statements
-        # Read in all statements
+        # Read in all pdf statements
         cat(file=stderr(), "Get text from statements\n")
         
         # create names of all statements
-        
         pdfnames <- v$data %>% 
             mutate(name = 
                        paste0(Surname, ", ", str_to_title(`Given Name`), " ",
